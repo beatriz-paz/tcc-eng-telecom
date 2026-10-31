@@ -14,8 +14,7 @@ O câncer de mama está entre as principais causas de adoecimento e mortalidade 
 
 ```text
 ├── 📂 dados_mamografia/     # Imagens, datasets, exames anotados e pré-processamento
-├── 📂 slides/               # Apresentações das bancas e qualificações (.pptx / .pdf)
-├── 📂 resumos/              # Fichamentos, resumos de artigos e notas de estudo
-├── 📂 documento/            # Texto final do TCC em LaTeX ou Docx
-├── 📂 codigo/               # Scripts de análise, modelos de aprendizado e pré-processamento
+├── 📂 slides/               # Apresentações das bancas e qualificações 
+├── 📂 documento/            # Texto final do TCC em Typst
+├── 📂 codigo/               # Scripts de análise, modelos de aprendizado
 └── README.md                # Documentação geral do repositório
