@@ -2,7 +2,7 @@
 
 ## Resumo
 
-- **O quê:** transforma as mamografias do mini-MIAS e do mini-DDSM em um dataset para classificar **normal (0) × anormal (1)**, reduzindo atalhos que inflam o resultado (*shortcut learning* e *data leakage*).
+- **O que faz:** transforma as mamografias do mini-MIAS e do mini-DDSM em um dataset para classificar **normal (0) × anormal (1)**, reduzindo atalhos que inflam o resultado (*shortcut learning* e *data leakage*).
 - **Como:** `python gerar_dataset.py` (roda em CPU, sem GPU).
 - **Resultado:** um único arquivo compactado, `dados_preprocessados_full.npz`, com os dois datasets juntos, separados pelo prefixo `mias_` e `ddsm_`.
 
