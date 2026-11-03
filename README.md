@@ -1,6 +1,5 @@
 # 🎓 Desenvolvimento de um Sistema Inteligente para Classificação de Artefatos em Mamografias utilizando Transformada Wavelet Integrada à Pipeline da CNN e do SWIN Transformer
 
-![Status](https://img.shields.io/badge/Status-%20Concluúdo-green)
 ![Curso](https://img.shields.io/badge/Curso-Engenharia_de_Telecomunicações-blue)
 ![Ano](https://img.shields.io/badge/Ano-2026-yellow)
 
