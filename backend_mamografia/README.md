@@ -4,11 +4,13 @@
 
 Este repositório contém o backend de uma aplicação web experimental para demonstração de modelos de aprendizado profundo aplicados à classificação de imagens mamográficas.
 
-A aplicação foi desenvolvida para permitir que um usuário envie uma imagem de mamografia por meio de uma interface web e, futuramente, receba a classificação realizada por um modelo treinado em PyTorch.
+A aplicação foi desenvolvida para permitir que um usuário envie uma imagem de mamografia por meio de uma interface web e receba a classificação realizada por um modelo treinado em PyTorch.
 
 O projeto está sendo desenvolvido em etapas, mantendo a interface, a API e os modelos de aprendizado profundo separados.
 
 **Status atual:** a interface web está publicada no Hugging Face Spaces e a API FastAPI está hospedada no Render. A comunicação entre ambas foi testada com sucesso. A integração dos pesos do modelo e a classificação real ainda estão pendentes.
+
+**Acesse aqui:** https://huggingface.co/spaces/beatriz-paz/classificacao-mamografias
 
 ## 2. Arquitetura da aplicação
 
