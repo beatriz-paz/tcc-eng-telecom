@@ -1,2 +1,8 @@
 fastapi[standard]
 python-multipart
+numpy
+Pillow
+scikit-image
+timm==1.0.31
+torch
+torchvision
