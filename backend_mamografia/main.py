@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import timm
+from huggingface_hub import hf_hub_download
 from PIL import Image, ImageOps, UnidentifiedImageError
 from skimage.exposure import equalize_adapthist
 from fastapi import FastAPI, UploadFile, File, HTTPException
@@ -17,9 +18,42 @@ from fastapi.middleware.cors import CORSMiddleware
 # Configuração
 # ---------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
-MODEL_PATH = Path(os.getenv("MODEL_PATH", BASE_DIR / "swin_ssf_final.pt"))
+MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "beatriz-paz/swin-mamografia")
+MODEL_FILENAME = os.getenv("HF_MODEL_FILENAME", "swin_ssf_final.pt")
+# Opcional: caminho local para testes. No Render, deixe esta variável vazia.
+MODEL_PATH_ENV = os.getenv("MODEL_PATH")
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+def resolve_model_path() -> Path:
+    """Localiza o checkpoint localmente ou baixa do Hugging Face Hub."""
+    if MODEL_PATH_ENV:
+        local_path = Path(MODEL_PATH_ENV)
+        if not local_path.is_file():
+            raise RuntimeError(f"O arquivo definido em MODEL_PATH não existe: {local_path}")
+        return local_path
+
+    # Facilita testes locais quando o .pt está ao lado do main.py.
+    local_checkpoint = BASE_DIR / MODEL_FILENAME
+    if local_checkpoint.is_file():
+        return local_checkpoint
+
+    try:
+        return Path(
+            hf_hub_download(
+                repo_id=MODEL_REPO_ID,
+                filename=MODEL_FILENAME,
+                repo_type="model",
+                token=os.getenv("HF_TOKEN") or None,
+            )
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            "Não foi possível baixar o checkpoint do Hugging Face. "
+            "Verifique HF_MODEL_REPO_ID, HF_MODEL_FILENAME e se HF_TOKEN "
+            "está configurado no Render com permissão de leitura."
+        ) from exc
 
 
 # ---------------------------------------------------------------------
@@ -70,16 +104,13 @@ def inject_ssf(model):
 
 
 def load_model():
-    if not MODEL_PATH.is_file():
-        raise RuntimeError(
-            f"Checkpoint não encontrado em {MODEL_PATH}. "
-            "Coloque swin_ssf_final.pt no backend ou configure MODEL_PATH."
-        )
+    model_path = resolve_model_path()
+    print(f"Carregando checkpoint: {model_path}")
 
     # weights_only=False é necessário para ler o checkpoint completo criado
     # pelo próprio projeto (dicionário com metadados e state_dict).
     checkpoint = torch.load(
-        MODEL_PATH,
+        model_path,
         map_location="cpu",
         weights_only=False,
     )
