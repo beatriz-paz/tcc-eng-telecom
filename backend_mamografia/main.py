@@ -1,4 +1,5 @@
 import os
+import gc
 from io import BytesIO
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -107,29 +108,51 @@ def load_model():
     model_path = resolve_model_path()
     print(f"Carregando checkpoint: {model_path}")
 
-    # weights_only=False é necessário para ler o checkpoint completo criado
-    # pelo próprio projeto (dicionário com metadados e state_dict).
+    # mmap=True mapeia o arquivo em vez de carregar todo o checkpoint
+    # imediatamente para uma cópia adicional na RAM. Requer checkpoint
+    # salvo no formato ZIP padrão do torch.save.
     checkpoint = torch.load(
         model_path,
         map_location="cpu",
         weights_only=False,
+        mmap=True,
     )
+
+    # Guardamos somente os metadados necessários durante a inferência.
+    # Não precisamos manter o state_dict inteiro no app.state.
+    checkpoint_info = {
+        "model_name": checkpoint["model_name"],
+        "num_classes": int(checkpoint["num_classes"]),
+        "img_size": int(checkpoint["img_size"]),
+        "adapt_mode": checkpoint.get("adapt_mode"),
+        "mean": checkpoint["mean"],
+        "std": checkpoint["std"],
+        "threshold": float(checkpoint["threshold"]),
+    }
 
     model = timm.create_model(
-        checkpoint["model_name"],
+        checkpoint_info["model_name"],
         pretrained=False,
-        num_classes=int(checkpoint["num_classes"]),
-        img_size=int(checkpoint["img_size"]),
+        num_classes=checkpoint_info["num_classes"],
+        img_size=checkpoint_info["img_size"],
     )
 
-    if checkpoint.get("adapt_mode") == "ssf":
+    if checkpoint_info["adapt_mode"] == "ssf":
         inject_ssf(model)
 
-    model.load_state_dict(checkpoint["state_dict"], strict=True)
+    # assign=True associa os tensores do checkpoint aos parâmetros do modelo,
+    # evitando a cópia parâmetro a parâmetro feita pelo carregamento padrão.
+    model.load_state_dict(checkpoint["state_dict"], strict=True, assign=True)
+
+    # O modelo mantém referências aos tensores necessários. O dicionário
+    # completo do checkpoint não precisa permanecer em memória.
+    del checkpoint
+    gc.collect()
+
     model.to(DEVICE)
     model.eval()
 
-    return model, checkpoint
+    return model, checkpoint_info
 
 
 # ---------------------------------------------------------------------
