@@ -83,7 +83,7 @@ Hospedagem da API por meio de um Web Service conectado ao GitHub.
 - Build Command: `pip install -r requirements.txt`
 - Start Command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
 
-O serviço disponibiliza um endereço público para receber as requisições da interface. O plano gratuito possui limitações de recursos e pode suspender temporariamente o serviço por inatividade.
+O serviço disponibiliza um endereço público para receber as requisições da interface. O plano gratuito possui limitações de recursos, **por isso foi utilizado uma versão reduzida do modelo treinado** (a qual não representa toda a performance real do modelo) e pode suspender temporariamente o serviço por inatividade.
 
 **Frontend — Hugging Face Spaces**
 
