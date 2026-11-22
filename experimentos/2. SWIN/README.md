@@ -2,14 +2,12 @@
 
 ## Resumo 
 
-Este notebook treina um **Swin Transformer Tiny** (pré-treinado no ImageNet) para classificar se uma mamografia é **Normal** ou **Anormal** (benigno ou maligno). O foco não é só acertar dentro de um banco de dados. O foco é medir quanto o desempenho cai quando o modelo é testado em outro banco, dessa forma validando se o modelo está conseguindo de fato generalizar ou apenas decorar. 
+Esses notebooks treinam um **Swin Transformer Tiny** (pré-treinado no ImageNet) para classificar se uma mamografia é **Normal** ou **Anormal** (benigno ou maligno). O foco não é só acertar dentro de um banco de dados. O foco é medir quanto o desempenho cai quando o modelo é testado em outro banco, dessa forma validando se o modelo está conseguindo de fato generalizar ou apenas decorar. 
 
 Para isso, o notebook usa dois datasets públicos (**mini-MIAS** e **Mini-DDSM**) e faz dois experimentos:
 
 1. **Teste interno:** treina e testa no mesmo dataset.
 2. **Teste externo:** treina em um dataset e testa no outro, nos dois sentidos.
-
-**Principal resultado:** o AUC cai ao trocar de dataset. A queda é de cerca de **0,04** (MIAS → DDSM) e **0,07** (DDSM → MIAS). A sensibilidade do DDSM → MIAS cai bastante (de 0,84 para 0,64) quando se usa o limiar escolhido no dataset de origem.
 
 ---
 
