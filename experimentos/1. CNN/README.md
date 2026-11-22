@@ -2,9 +2,9 @@
 
 ## Resumo
 
-Este notebook treina uma **ResNet50** (pré-treinada no ImageNet-1k) para classificar mamografias como **Normal** ou **Anormal** (benigno ou maligno). O foco não é apenas medir o desempenho dentro de um banco de dados, mas também verificar quanto esse desempenho se mantém quando o modelo é avaliado em outro banco. Assim, é possível investigar se o modelo aprendeu características que podem ser transferidas entre datasets ou se depende muito das características do conjunto usado no treinamento.
+Esses notebooks treinam uma **ResNet50** (pré-treinada no ImageNet-1k) para classificar mamografias como **Normal** ou **Anormal** (benigno ou maligno). O foco não é apenas medir o desempenho dentro de um banco de dados, mas também verificar quanto esse desempenho se mantém quando o modelo é avaliado em outro banco. Assim, é possível investigar se o modelo aprendeu características que podem ser transferidas entre datasets ou se depende muito das características do conjunto usado no treinamento.
 
-Para isso, o notebook utiliza dois datasets públicos (**mini-MIAS** e **Mini-DDSM**) e realiza dois experimentos:
+Para isso, cada notebook utiliza dois datasets públicos (**mini-MIAS** e **Mini-DDSM**) e realiza dois experimentos:
 
 1. **Teste interno:** treinamento e teste no mesmo dataset, por validação cruzada.
 2. **Teste externo:** treinamento em um dataset e avaliação no outro, nos dois sentidos.
