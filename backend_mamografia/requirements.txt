@@ -3,7 +3,5 @@ python-multipart
 numpy
 Pillow
 scikit-image
-timm==1.0.31
-torch
-torchvision
+onnxruntime
 huggingface_hub>=0.26.0,<2.0

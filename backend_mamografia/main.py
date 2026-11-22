@@ -1,13 +1,10 @@
 import os
-import gc
 from io import BytesIO
 from pathlib import Path
 from contextlib import asynccontextmanager
 
 import numpy as np
-import torch
-import torch.nn as nn
-import timm
+import onnxruntime as ort
 from huggingface_hub import hf_hub_download
 from PIL import Image, ImageOps, UnidentifiedImageError
 from skimage.exposure import equalize_adapthist
@@ -20,25 +17,38 @@ from fastapi.middleware.cors import CORSMiddleware
 # ---------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_REPO_ID = os.getenv("HF_MODEL_REPO_ID", "beatriz-paz/swin-mamografia")
-MODEL_FILENAME = os.getenv("HF_MODEL_FILENAME", "swin_ssf_final.pt")
-# Opcional: caminho local para testes. No Render, deixe esta variável vazia.
+MODEL_FILENAME = os.getenv("HF_MODEL_FILENAME", "swin_ssf_int8.onnx")
 MODEL_PATH_ENV = os.getenv("MODEL_PATH")
 MAX_FILE_SIZE = 25 * 1024 * 1024  # 25 MB
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# Metadados do pré-processamento/modelo.
+# IMG_SIZE, MODEL_THRESHOLD, MODEL_MEAN e MODEL_STD devem corresponder
+# exatamente aos valores usados no treinamento/validação.
+IMG_SIZE = int(os.getenv("IMG_SIZE", "224"))
+MODEL_THRESHOLD = float(os.getenv("MODEL_THRESHOLD", "0.6843695044517517"))
+MODEL_MEAN = [float(v) for v in os.getenv(
+    "MODEL_MEAN", "0.485,0.456,0.406"
+).split(",")]
+MODEL_STD = [float(v) for v in os.getenv(
+    "MODEL_STD", "0.229,0.224,0.225"
+).split(",")]
+
+# Limita as threads para reduzir o pico de RAM em instâncias pequenas.
+ORT_INTRA_OP_THREADS = int(os.getenv("ORT_INTRA_OP_THREADS", "1"))
+ORT_INTER_OP_THREADS = int(os.getenv("ORT_INTER_OP_THREADS", "1"))
 
 
 def resolve_model_path() -> Path:
-    """Localiza o checkpoint localmente ou baixa do Hugging Face Hub."""
+    """Localiza o ONNX localmente ou baixa do Hugging Face Hub."""
     if MODEL_PATH_ENV:
         local_path = Path(MODEL_PATH_ENV)
         if not local_path.is_file():
-            raise RuntimeError(f"O arquivo definido em MODEL_PATH não existe: {local_path}")
+            raise RuntimeError(f"MODEL_PATH não existe: {local_path}")
         return local_path
 
-    # Facilita testes locais quando o .pt está ao lado do main.py.
-    local_checkpoint = BASE_DIR / MODEL_FILENAME
-    if local_checkpoint.is_file():
-        return local_checkpoint
+    local_model = BASE_DIR / MODEL_FILENAME
+    if local_model.is_file():
+        return local_model
 
     try:
         return Path(
@@ -51,130 +61,68 @@ def resolve_model_path() -> Path:
         )
     except Exception as exc:
         raise RuntimeError(
-            "Não foi possível baixar o checkpoint do Hugging Face. "
-            "Verifique HF_MODEL_REPO_ID, HF_MODEL_FILENAME e se HF_TOKEN "
-            "está configurado no Render com permissão de leitura."
+            "Não foi possível baixar o ONNX do Hugging Face. "
+            "Confira HF_MODEL_REPO_ID, HF_MODEL_FILENAME e HF_TOKEN."
         ) from exc
 
 
-# ---------------------------------------------------------------------
-# SSF: deve ser idêntico ao módulo utilizado no notebook de treinamento
-# ---------------------------------------------------------------------
-class SSF(nn.Module):
-    def __init__(self, channels, channel_dim=-1):
-        super().__init__()
-        self.gamma = nn.Parameter(torch.ones(channels))
-        self.beta = nn.Parameter(torch.zeros(channels))
-        self.channel_dim = channel_dim
-
-    def forward(self, x):
-        shape = [1] * x.dim()
-        shape[self.channel_dim] = -1
-        return (
-            x * self.gamma.view(shape).to(x.dtype)
-            + self.beta.view(shape).to(x.dtype)
-        )
-
-
-def inject_ssf(model):
-    """Insere SSF nas mesmas camadas usadas no treinamento."""
-    head = model.get_classifier()
-
-    def _inject(module):
-        for name, child in list(module.named_children()):
-            if child is head:
-                continue
-            if isinstance(child, nn.Linear):
-                setattr(module, name, nn.Sequential(child, SSF(child.out_features)))
-            elif isinstance(child, nn.LayerNorm):
-                setattr(
-                    module,
-                    name,
-                    nn.Sequential(child, SSF(child.normalized_shape[-1])),
-                )
-            elif isinstance(child, nn.Conv2d):
-                setattr(
-                    module,
-                    name,
-                    nn.Sequential(child, SSF(child.out_channels, channel_dim=1)),
-                )
-            else:
-                _inject(child)
-
-    _inject(model)
-
-
 def load_model():
-    model_path = resolve_model_path()
-    print(f"Carregando checkpoint: {model_path}")
+    if len(MODEL_MEAN) != 3 or len(MODEL_STD) != 3:
+        raise RuntimeError("MODEL_MEAN e MODEL_STD precisam ter três valores.")
+    if any(value == 0 for value in MODEL_STD):
+        raise RuntimeError("Nenhum valor de MODEL_STD pode ser zero.")
 
-    # mmap=True mapeia o arquivo em vez de carregar todo o checkpoint
-    # imediatamente para uma cópia adicional na RAM. Requer checkpoint
-    # salvo no formato ZIP padrão do torch.save.
-    checkpoint = torch.load(
-        model_path,
-        map_location="cpu",
-        weights_only=False,
-        mmap=True,
+    model_path = resolve_model_path()
+    print(f"Carregando modelo ONNX: {model_path}")
+    print(f"Tamanho do arquivo: {model_path.stat().st_size / (1024 * 1024):.2f} MB")
+
+    options = ort.SessionOptions()
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    options.intra_op_num_threads = ORT_INTRA_OP_THREADS
+    options.inter_op_num_threads = ORT_INTER_OP_THREADS
+    options.enable_mem_pattern = False
+
+    session = ort.InferenceSession(
+        str(model_path),
+        sess_options=options,
+        providers=["CPUExecutionProvider"],
     )
 
-    # Guardamos somente os metadados necessários durante a inferência.
-    # Não precisamos manter o state_dict inteiro no app.state.
-    checkpoint_info = {
-        "model_name": checkpoint["model_name"],
-        "num_classes": int(checkpoint["num_classes"]),
-        "img_size": int(checkpoint["img_size"]),
-        "adapt_mode": checkpoint.get("adapt_mode"),
-        "mean": checkpoint["mean"],
-        "std": checkpoint["std"],
-        "threshold": float(checkpoint["threshold"]),
+    input_info = session.get_inputs()[0]
+    output_info = session.get_outputs()[0]
+    print(f"Entrada ONNX: {input_info.name} | shape={input_info.shape} | type={input_info.type}")
+    print(f"Saída ONNX: {output_info.name} | shape={output_info.shape} | type={output_info.type}")
+
+    return session, {
+        "input_name": input_info.name,
+        "output_name": output_info.name,
+        "img_size": IMG_SIZE,
+        "mean": MODEL_MEAN,
+        "std": MODEL_STD,
+        "threshold": MODEL_THRESHOLD,
     }
 
-    model = timm.create_model(
-        checkpoint_info["model_name"],
-        pretrained=False,
-        num_classes=checkpoint_info["num_classes"],
-        img_size=checkpoint_info["img_size"],
-    )
-
-    if checkpoint_info["adapt_mode"] == "ssf":
-        inject_ssf(model)
-
-    # assign=True associa os tensores do checkpoint aos parâmetros do modelo,
-    # evitando a cópia parâmetro a parâmetro feita pelo carregamento padrão.
-    model.load_state_dict(checkpoint["state_dict"], strict=True, assign=True)
-
-    # O modelo mantém referências aos tensores necessários. O dicionário
-    # completo do checkpoint não precisa permanecer em memória.
-    del checkpoint
-    gc.collect()
-
-    model.to(DEVICE)
-    model.eval()
-
-    return model, checkpoint_info
-
 
 # ---------------------------------------------------------------------
-# Pré-processamento para ROI já recortada pelo usuário
+# Pré-processamento: preservado do main.py anterior
 # ---------------------------------------------------------------------
-def preprocess_roi(image_bytes: bytes, checkpoint: dict) -> torch.Tensor:
+def preprocess_roi(image_bytes: bytes, config: dict) -> np.ndarray:
     """
     Recebe uma ROI mamográfica já recortada.
-    Reproduz a etapa de CLAHE, redimensionamento e normalização
-    usada no notebook para a entrada do Swin.
+    Mantém min-max, CLAHE, preenchimento quadrado, redimensionamento,
+    replicação do canal cinza e normalização do código anterior.
 
-    Retorna tensor (1, 3, 224, 224).
+    Retorna array float32 no formato NCHW: (1, 3, IMG_SIZE, IMG_SIZE).
     """
     try:
         with Image.open(BytesIO(image_bytes)) as im:
             im = ImageOps.exif_transpose(im)
-            # Preserva a faixa dinâmica de imagens em 16 bits. A conversão direta
-            # para "L" poderia descartar informação de intensidade.
             if im.mode in ("P", "PA", "1"):
                 arr = np.asarray(im.convert("RGB"), dtype=np.float32)
             else:
                 arr = np.asarray(im)
+
             if arr.ndim == 3:
                 gray = arr[..., :3].astype(np.float32).mean(axis=-1)
             elif arr.ndim == 2:
@@ -193,11 +141,11 @@ def preprocess_roi(image_bytes: bytes, checkpoint: dict) -> torch.Tensor:
             detail="A ROI está vazia ou é muito pequena. Envie um recorte com pelo menos 16 × 16 pixels.",
         )
 
-    # Igual ao pipeline do treinamento: min-max antes do CLAHE.
+    # Min-max antes do CLAHE, como no código anterior.
     gray01 = (gray - gray.min()) / (gray.max() - gray.min() + 1e-8)
     roi_clahe = equalize_adapthist(gray01, clip_limit=0.02)
 
-    # O pipeline de treinamento completa com zeros para ficar quadrada.
+    # Preenchimento central com zeros para formar uma imagem quadrada.
     h, w = roi_clahe.shape
     side = max(h, w)
     square = np.zeros((side, side), dtype=np.float32)
@@ -205,31 +153,51 @@ def preprocess_roi(image_bytes: bytes, checkpoint: dict) -> torch.Tensor:
     left = (side - w) // 2
     square[top:top + h, left:left + w] = roi_clahe
 
-    # Conversão uint8 e redimensionamento como no script de geração.
     img_uint8 = np.asarray(
         Image.fromarray((square * 255).astype(np.uint8)).resize(
-            (int(checkpoint["img_size"]), int(checkpoint["img_size"])),
+            (config["img_size"], config["img_size"]),
             Image.Resampling.LANCZOS,
         ),
         dtype=np.uint8,
     )
 
-    # O notebook replica o canal cinza em RGB e normaliza com ImageNet.
+    # Escala [0,1], replica cinza em RGB e normaliza.
     img = np.repeat(img_uint8[..., None], 3, axis=-1).astype(np.float32) / 255.0
-    mean = np.asarray(checkpoint["mean"], dtype=np.float32).reshape(1, 1, 3)
-    std = np.asarray(checkpoint["std"], dtype=np.float32).reshape(1, 1, 3)
+    mean = np.asarray(config["mean"], dtype=np.float32).reshape(1, 1, 3)
+    std = np.asarray(config["std"], dtype=np.float32).reshape(1, 1, 3)
     img = (img - mean) / std
 
-    tensor = torch.from_numpy(img.transpose(2, 0, 1)).float().unsqueeze(0)
-    return tensor
+    # ONNX geralmente recebe NCHW para modelos exportados do PyTorch.
+    return np.ascontiguousarray(img.transpose(2, 0, 1)[None, ...], dtype=np.float32)
+
+
+def predict_probability(session, config, input_array: np.ndarray) -> float:
+    """Executa o grafo ONNX e converte o logit binário em probabilidade."""
+    outputs = session.run(
+        [config["output_name"]],
+        {config["input_name"]: input_array},
+    )
+    output = np.asarray(outputs[0], dtype=np.float32).reshape(-1)
+
+    if output.size != 1:
+        raise RuntimeError(
+            f"Esperava uma saída binária única (1 logit), mas o ONNX retornou shape {np.asarray(outputs[0]).shape}."
+        )
+
+    logit = float(output[0])
+    # O main.py original aplicava sigmoid ao logit do modelo.
+    # Portanto, esta implementação mantém a mesma interpretação.
+    logit = float(np.clip(logit, -80.0, 80.0))
+    return float(1.0 / (1.0 + np.exp(-logit)))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    model, checkpoint = load_model()
-    app.state.model = model
-    app.state.checkpoint = checkpoint
+    session, config = load_model()
+    app.state.session = session
+    app.state.config = config
     yield
+    app.state.session = None
 
 
 app = FastAPI(
@@ -243,7 +211,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Restringir ao domínio do Space antes de uso público amplo.
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -252,16 +220,16 @@ app.add_middleware(
 
 @app.get("/")
 def home():
-    return {"message": "API de mamografia funcionando!"}
+    return {"message": "API de mamografia funcionando com ONNX Runtime!"}
 
 
 @app.get("/health")
 def health():
-    model_loaded = hasattr(app.state, "model")
+    model_loaded = getattr(app.state, "session", None) is not None
     return {
         "status": "online" if model_loaded else "loading",
         "model_loaded": model_loaded,
-        "device": str(DEVICE),
+        "runtime": "ONNX Runtime CPU",
     }
 
 
@@ -284,21 +252,19 @@ async def predict(file: UploadFile = File(...)):
         )
 
     try:
-        x = preprocess_roi(image_bytes, app.state.checkpoint).to(DEVICE)
-        with torch.inference_mode():
-            logit = app.state.model(x).reshape(-1)
-            probability_abnormal = torch.sigmoid(logit).item()
+        config = app.state.config
+        x = preprocess_roi(image_bytes, config)
+        probability_abnormal = predict_probability(app.state.session, config, x)
     except HTTPException:
         raise
     except Exception as exc:
-        # Detalhes técnicos ficam no log do servidor, não na resposta pública.
         print(f"Erro durante a inferência: {type(exc).__name__}: {exc}")
         raise HTTPException(
             status_code=500,
             detail="Não foi possível processar a imagem.",
         )
 
-    threshold = float(app.state.checkpoint["threshold"])
+    threshold = float(config["threshold"])
     predicted_label = int(probability_abnormal >= threshold)
     probability_normal = 1.0 - probability_abnormal
 
