@@ -16,5 +16,5 @@ O câncer de mama está entre as principais causas de incidência e mortalidade 
 ├── 📂 dados_mamografia/     # Imagens, datasets, exames anotados e pré-processamento
 ├── 📂 documento/            # Texto final do TCC em Typst
 ├── 📂 experimentos/         # Código dos modelos de aprendizado (CNN, SWIN e Dual)
-├── 📂 slides/               # Apresentações das bancas e qualificações 
-└── README.md                # Documentação geral do repositório
+├── 📂 slides/               # Apresentações do TCC para a banca  
+└── README.md                
