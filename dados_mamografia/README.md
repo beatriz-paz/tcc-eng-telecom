@@ -127,7 +127,7 @@ Saídas: `diagnostico_mias.csv`, `diagnostico_ddsm.csv` (uma linha por imagem, c
 | `OUT_NPZ` | nome do arquivo final |
 | `ROI_SEED` | semente para resultados reprodutíveis |
 
-## Observações
+## Observações para uso deste script:
 
 - **Divida sempre por paciente** (use `*_g`, ex.: `GroupKFold`), nunca por imagem. As duas mamas da mesma pessoa são muito parecidas e causam vazamento.
 - **Trocou de `full` para `roi`?** Mude `OUT_NPZ`, senão o arquivo anterior é sobrescrito.
