@@ -113,8 +113,6 @@ python validar_img.py --npz        # só as checagens do .npz
 
 Saídas: `diagnostico_mias.csv`, `diagnostico_ddsm.csv` (uma linha por imagem, com métricas e alertas), `fig_<dataset>_<categoria>.png` e `npz_<dataset>.png`.
 
-> **Atenção:** o script importa `gerar_dataset_v3`, depois `_v2` e por último `gerar_dataset`, o que existir primeiro. Confira a linha `[validar_img] usando ...py` impressa ao rodar, para ter certeza de que está validando a versão certa.
-
 ## Principais parâmetros (`CONFIG`)
 
 | Parâmetro | Função |
